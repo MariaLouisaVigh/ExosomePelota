@@ -1,5 +1,4 @@
-###### figure 2 for small RNA exosome paper#####
-## now made with araport annotations of TE and intergenic regions ### 
+###### figure 2 #####
 
 ###### set wd and load packages ######
 setwd("/binf-isilon/PBgrp/xpj980/datascratch/2015_exosome_mutants/03.STAR_mapping/sam_files")
@@ -191,8 +190,6 @@ DESeqresultsRrp45b <- DESeq2::results(deseqqed, contrast = c("genotype", "rrp45b
 DESeqresultsSki2.5 <- DESeq2::results(deseqqed, contrast = c("genotype", "ski2.5", "wt"), alpha = 0.1)
 DESeqresultsSki3 <- DESeq2::results(deseqqed, contrast = c("genotype", "ski3", "wt"), alpha = 0.1)
 
-
-
 ###### gathered DESegresults-table #######
 rrp45b_tibble <- DESeqresultsRrp45b %>% 
   as.data.frame() %>%
@@ -217,9 +214,9 @@ ski3_tibble <- DESeqresultsSki3 %>%
 
 gathered_DESeqresults <- bind_rows(... = rrp45b_tibble, ski2.5_tibble, ski3_tibble) 
 
-write.xlsx(x = gathered_DESeqresults, file = "/binf-isilon/PBgrp/xpj980/datascratch/GEO/deseqcontrast1.xlsx")
-save(gathered_DESeqresults, 
-     file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2015_gatheredDESeqresults.RData")
+#write.xlsx(x = gathered_DESeqresults, file = "/binf-isilon/PBgrp/xpj980/datascratch/GEO/deseqcontrast1.xlsx")
+#save(gathered_DESeqresults, 
+  #   file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2015_gatheredDESeqresults.RData")
 
 ### excel sheet for paper without intergenic regions ## 
 test <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
@@ -231,8 +228,36 @@ test <- left_join(gathered_DESeqresults, to_join, by = "gene") %>%
   mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
                                 TRUE ~ "miRNA_target")) %>% 
   select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype)
-write.xlsx(x = test, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentAWOintergenic.xlsx")
+#write.xlsx(x = test, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentAWOintergenic.xlsx")
 
+# Supplementary Table S2 (2015 dataset - need to filter ski2-5 on log2FC instead of padj (revision))
+
+part1 <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
+  mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
+                                T ~ locus_type)) %>% 
+  filter(padj < 0.05) %>% 
+  filter(locus_type !="intergenic") %>% 
+  left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) %>%
+  filter(genotype != "ski2.5")
+
+part2 <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
+  mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
+                                T ~ locus_type)) %>% 
+  filter(log2FoldChange > 1) %>% 
+  filter(locus_type !="intergenic") %>% 
+  left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) %>% 
+  filter(genotype == "ski2.5") %>% 
+  filter(locus_type == "miRNA_target")
+
+new_table_for_paper <- rbind(part1, part2)
+
+write.xlsx(x = new_table_for_paper, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentBWOintergenicSKI2update.xlsx")
 
 #### HEATMAPS ####
 ## log2fold heatmap
