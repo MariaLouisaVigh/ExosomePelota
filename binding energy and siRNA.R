@@ -106,3 +106,5 @@ C <- ggplot(data=dif3, aes(sign.diff.target, -Gibbs5a, color =sign.diff.target))
   facet_wrap(~miRNAfamily)
 
 C
+
+D
