@@ -15,10 +15,11 @@ library(reshape2)
 library(wesanderson)
 library(VennDiagram)
 library(readxl)
+library(ComplexUpset)
 library(openxlsx)
 
-
 #### miRNA target list ####
+###### miRNA target list ######## 
 
 miRNAtargets_rawtable <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/TAIR/miRNAtargetlist_Maria_degradome_done.xlsx", col_names = T)
 
@@ -38,7 +39,7 @@ setwd("/binf-isilon/PBgrp/xpj980/datascratch/2019_exosome_mutants/04.STAR_mappin
 ##import my featureCounts table 
 raw_featureCount_table <- read.table("featureCountsaraport", header = TRUE, row.names = 1)
 glimpse(raw_featureCount_table)
-## make the table DESeq2-usable by removing useless columns (chr, start, end, strand and length) and also hen2.sop3
+
 DESeq_table <- raw_featureCount_table %>%
   rownames_to_column() %>%
   select(1,7:15,19:28) %>% 
@@ -140,9 +141,9 @@ sampleDistMatrix <- as.matrix(sampleDists)
 colnames(sampleDistMatrix) <- NULL
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 test <- pheatmap(sampleDistMatrix,
-clustering_distance_rows=sampleDists,
-clustering_distance_cols=sampleDists,
-col=colors)
+                 clustering_distance_rows=sampleDists,
+                 clustering_distance_cols=sampleDists,
+                 col=colors)
 
 ggsave(test, file = "/binf-isilon/PBgrp/xpj980/figures/20210324distancematdataset2araport.svg", units = "in", width = 15, height = 15, dpi = 300)
 
@@ -223,7 +224,11 @@ load("/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exoDESEQpelota.RData")
 load("/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exoDESEQrrp45a.RData")
 load("/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exoDESEQtable.RData")
 
-#### excel sheet for paper without intergenic regions ### 
+## look for deseq miR163 targets for light induction experiment 
+gathered_DESeqresults %>% filter(gene %in% c("AT1G66690", "AT1G66700", "AT1G66720", "AT3G44870", "AT3G44860", "AT1G15125")) %>% 
+  filter(padj < 0.05)
+
+#### excel sheets for paper ####
 test <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
   mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
                                 T ~ locus_type)) %>% 
@@ -235,10 +240,115 @@ test <- left_join(gathered_DESeqresults, to_join, by = "gene") %>%
   filter(locus_type !="intergenic") %>% 
   left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
   mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
-                           TRUE ~ "miRNA_target")) %>% 
-  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype)
-write.xlsx(x = test, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentBWOintergenic.xlsx")
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) 
 
+#write.xlsx(x = test, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentBWOintergenic.xlsx")
+
+# filter pel1.1 on log2CF instead of padj as it only consists of one replicate (Revision)
+part1 <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
+  mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
+                                T ~ locus_type)) %>% 
+  filter(padj < 0.05) %>% 
+  mutate(genotype = case_when(genotype == "GKpelota" ~ "pel1.2", 
+                              T ~ genotype), 
+         genotype = case_when(genotype == "SAILpelota" ~ "pel1.1", 
+                              T ~ genotype)) %>% 
+  filter(locus_type !="intergenic") %>% 
+  left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) %>%
+  filter(genotype != "pel1.1")
+
+part2 <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
+  mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
+                                T ~ locus_type)) %>% 
+  filter(log2FoldChange > 0.9) %>% 
+  mutate(genotype = case_when(genotype == "GKpelota" ~ "pel1.2", 
+                              T ~ genotype), 
+         genotype = case_when(genotype == "SAILpelota" ~ "pel1.1", 
+                              T ~ genotype)) %>% 
+  filter(locus_type !="intergenic") %>% 
+  left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) %>% 
+  filter(genotype == "pel1.1") %>% 
+  filter(locus_type == "miRNA_target")
+
+pel1.1_miRNAtargets_filtered <- c(part2$gene)
+
+new_table_for_paper <- rbind(part1, part2)
+
+#write.xlsx(x = new_table_for_paper, file = "/binf-isilon/PBgrp/xpj980/figures/DESeq2ExperimentBWOintergenicPEL1update.xlsx")
+
+pel2.5_miRNAtargets_filtered <- c(part2$gene)
+
+### Suppl. FigS4 ####
+#overlap between pelota alleles 
+colors <- c("#986D8E", "#87A8A4")
+
+pel1.2_miRNAtargets <- test %>% 
+  filter(genotype == "pel1.2" & locus_type == "miRNA_target" & log2FoldChange > 0) %>% 
+  pull(gene)
+
+s4 <- list(pel1.1 = c(pel1.1_miRNAtargets_filtered),
+           pel1.2 = c(pel1.2_miRNAtargets))
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/pelotaoverlap.svg")
+
+
+### look for targets in hen2 and rrp4 that overlaps with Voinnet nuclear/cytoplasmic shuttling paper (revision)
+look <- test %>% 
+  filter(genotype %in% c("ski2.5", "rrp4", "hen2.5")) %>% 
+  filter(locus_type == "miRNA_target") %>% 
+  filter(gene %in% c("AT1G12820", "AT1G48410", "AT1G53230", "AT1G62670", "AT1G62910", "AT1G62930", "AT1G63070", "AT1G63080", "AT1G63130", "AT1G63150", "AT1G63230", "AT3G23690", "AT3G26810", "AT4G36920", "AT5G16640", "AT5G41610", "AT1G12300", "AT1G12460", "AT1G12620", "AT1G12775", "AT1G62914", "AT1G63630", "AT2G46800")) %>% 
+  filter(padj < 0.05) %>% 
+  mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
+                                log2FoldChange < 0 ~ "down")) %>%
+  group_by(genotype,up_or_down) %>%
+  add_tally(name = "sum") %>%
+  distinct() %>%
+  ungroup() %>%
+  mutate(sum= case_when(up_or_down == "down" ~ -1*sum,
+                        up_or_down == "up" ~ 1*sum)) %>% 
+  distinct(genotype, up_or_down, sum)
+
+revision <- left_join(look, miRNAtargets, by = "gene") %>% select(gene, genotype, up_or_down, miRNA)
+write.xlsx(revision, file = "/binf-isilon/PBgrp/xpj980/figures/BolognaTable.xlsx")
+
+(barplot_across_geno <- ggplot(look, aes(x= genotype, y=sum, fill = up_or_down)) +
+    geom_col(alpha = 0.8) +
+    geom_text(aes(label = sum), vjust=1.6, color="white", size = 3) +
+    labs(y= "number of genes\n", x = "genotype") + 
+    cowplot::theme_cowplot() + 
+    scale_x_discrete(position = "top") + 
+    ggtitle("miRNA targets from Bologna et al.") + 
+    theme(strip.text.x = element_text(size = 12,
+                                      face = "bold",
+                                      color = "#22292F"),
+          strip.background = element_blank(),
+          plot.title = element_text(size = 16, 
+                                    face = "bold",
+                                    color = "#22292F", 
+                                    margin = margin(b = 8)), 
+          axis.title.x = element_text(size = 10,
+                                      face = "bold",
+                                      color = "#22292F", 
+                                      margin = margin(t = 15)),
+          axis.title.y = element_text(size = 10,
+                                      face = "bold",
+                                      color = "#22292F"), 
+          axis.text.x = element_text(size = 8), 
+          axis.text.y = element_text(size = 8),
+          legend.title = element_text(size = 9,
+                                      face = "bold",
+                                      color = "#22292F"), 
+          legend.text = element_text(size = 8)))
+
+#ggsave(barplot_across_geno, file = "/binf-isilon/PBgrp/xpj980/figures/Voinnet.svg", device = "svg", units = "in", width = 15, height = 15, dpi = 300)
 
 ###### Figure 3A ######
 barplot_table <- left_join(x = gathered_DESeqresults_pelota, y = miRNAtargets, by = "gene", copy = FALSE) %>%
@@ -248,7 +358,7 @@ to_plot <- barplot_table %>%
   mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
                                 log2FoldChange < 0 ~ "down"), 
          miRNA = case_when(is.na(miRNA) ~ "other", 
-                           TRUE ~ "miRNA_target")) %>%
+                           TRUE ~ "miRNA_target")) %>% 
   select(genotype, miRNA, up_or_down)
 
 to_tally <- to_plot %>% 
@@ -333,7 +443,7 @@ to_tally$plot <- factor(to_tally$plot, levels = c("miRNA_targetup", "miRNA_targe
 
 #ggsave(barplot_across_geno, file = "/binf-isilon/PBgrp/xpj980/figures/20210423Figure3Aaraport.svg", device = "svg", units = "in", width = 15, height = 15, dpi = 300)
 
-#### Figure 3C ######
+#### Figure 3B ######
 
 left_joined <- left_joined <- left_join(x = gathered_DESeqresults_pelota, y = miRNAtargets, by = "gene")
 
@@ -355,36 +465,12 @@ SAILpelota_list <- left_joined[left_joined$genotype=="SAILpelota",] %>%
   filter(!is.na(miRNA)) %>%
   pull(gene) 
 
-# Object for Carlotta to make euler Diagrams
+# Object for Carlotta to make Venn Diagrams
 mariaslistfig35 <- list("ski2_2019_list" = ski2_list, "GKpelota_list" = GKpelota_list, "SAILpelota_list" = SAILpelota_list, "ski2_2019_nontarg_list" = ski2_other, "GKpelota_nontarg_list" = GKpelota_other,  "SAILpelota_nontarg_list" = SAILpelota_other, "hen2_list" = hen2_list, "rrp4_list" = rrp4_list) 
 save(mariaslistfig35, file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exosomeVenns.RData")
 
-test <- venn.diagram(
-  x = list(ski2_list, SAILpelota_list, GKpelota_list), 
-  category.names = c("ski2" ,"SAILpelota", "GKpelota"),
-  output = TRUE ,
-  filename = NULL, 
-  imagetype="svg" ,
-  height = 480 , 
-  width = 480 , 
-  resolution = 300,
-  compression = "lzw",
-  lwd = 1,
-  col=c("#283148", "#913535", "#bbbbbb"),
-  fill = c(alpha("#283148"), alpha("#913535"), alpha("#bbbbbb")),
-  cex = 0.5,
-  fontfamily = "sans",
-  cat.cex = 0.3,
-  cat.default.pos = "outer",
-  cat.pos = c(-27, 27, 135),
-  cat.dist = c(0.055, 0.055, 0.085),
-  cat.fontfamily = "sans",
-  cat.col = c("black", 'black', 'black'),
-  rotation = 1
-)
-#ggsave(test, filename = "/binf-isilon/PBgrp/xpj980/figures/3Bvennaraport.svg")
-
 # and the "other genes overlap"
+## and the "other genes" in the mutants, how many do they have in common? 
 
 ski2_other <- left_joined[left_joined$genotype=="ski2.5",] %>% 
   filter(padj<0.05) %>% 
@@ -404,39 +490,27 @@ SAILpelota_other <- left_joined[left_joined$genotype=="SAILpelota",] %>%
   filter(is.na(miRNA)) %>%
   pull(gene) 
 
+#### scatterplot ski2-5 & pelota alleles ####
 
-test <- venn.diagram(
-  x = list(ski2_other, SAILpelota_other, GKpelota_other), 
-  category.names = c("ski2" , "SAILpelota", "GKpelota"),
-  output = TRUE ,
-  filename = NULL, 
-  imagetype="svg" ,
-  height = 480 , 
-  width = 480 , 
-  resolution = 300,
-  compression = "lzw",
-  lwd = 1,
-  col=c("#283148", "#913535", "#bbbbbb"),
-  fill = c(alpha("#283148"), alpha("#913535"), alpha("#bbbbbb")),
-  cex = 0.5,
-  fontfamily = "sans",
-  cat.cex = 0.3,
-  cat.default.pos = "outer",
-  cat.pos = c(-27, 27, 135),
-  cat.dist = c(0.055, 0.055, 0.085),
-  cat.fontfamily = "sans",
-  cat.col = c("black", 'black', 'black'),
-  rotation = 1
-)
-#ggsave(test, filename = "/binf-isilon/PBgrp/xpj980/figures/3Bvenn_otheraraport.svg")
-
-#### Figure 3D ####
-
-miRNAtargets_toscatter_pel1.1 <- left_joined <- left_join(x = gathered_DESeqresults_pelota, y = miRNAtargets, by = "gene") %>% 
-  filter(target_name != "NA" & genotype == "SAILpelota") %>% 
+miRNAtargets_toscatter_pel1.1 <- left_join(gathered_DESeqresults, to_join, by = "gene") %>% 
+  mutate(locus_type = case_when(is.na(locus_type) ~ "intergenic", 
+                                T ~ locus_type)) %>% 
+  filter(log2FoldChange > 0.9) %>% 
+  mutate(genotype = case_when(genotype == "GKpelota" ~ "pel1.2", 
+                              T ~ genotype), 
+         genotype = case_when(genotype == "SAILpelota" ~ "pel1.1", 
+                              T ~ genotype)) %>% 
+  filter(locus_type !="intergenic") %>% 
+  left_join(., miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(locus_type = case_when(is.na(miRNA) ~ locus_type, 
+                                TRUE ~ "miRNA_target")) %>% 
+  select(gene, baseMean, log2FoldChange, pvalue, padj, locus_type, genotype) %>% 
+  filter(genotype == "pel1.1") %>% 
+  filter(locus_type == "miRNA_target") %>%
   dplyr::rename(log2FCSAIL = log2FoldChange) %>% 
-  mutate(diffexp_pel = case_when(padj < 0.05 ~ "yes", 
-                                 T ~ "no"))
+  full_join(., y =miRNAtargets) %>%
+  mutate(diffexp_pel = case_when(is.na(genotype) ~ "no", 
+                                 T ~ "yes"))
 
 miRNAtargets_toscatter_pel1.2 <- left_joined <- left_join(x = gathered_DESeqresults_pelota, y = miRNAtargets, by = "gene") %>% 
   filter(target_name != "NA" & genotype == "GKpelota") %>% 
@@ -448,7 +522,7 @@ miRNAtargets_toscatter_ski2.5 <- left_joined <- left_join(x = gathered_DESeqresu
   filter(target_name != "NA" & genotype == "ski2.5") %>% 
   dplyr::rename(log2FCski2 = log2FoldChange) %>% 
   mutate(diffexp_ski2 = case_when(padj < 0.05 ~ "yes", 
-                                 T ~ "no"))
+                                  T ~ "no"))
 
 to_plot <- left_join(miRNAtargets_toscatter_pel1.2, miRNAtargets_toscatter_ski2.5, by = "gene") %>% 
   mutate(color = case_when(diffexp_ski2 == "yes" & diffexp_pel == "no" ~ "ski2", 
@@ -466,7 +540,7 @@ res
 
 cor(to_plot$log2FCGKpel, to_plot$log2FCski2, method = "pearson")
 
-  plot <- ggplot(to_plot, aes(x=log2FCGKpel, y = log2FCski2, col = color)) + 
+plot <- ggplot(to_plot, aes(x=log2FCGKpel, y = log2FCski2, col = color)) + 
   geom_point() + 
   geom_text_repel(aes(label=ifelse(color == "ski2",as.character(target_name.x),'')),hjust=0,vjust=0, max.overlaps = Inf) + 
   geom_text_repel(aes(label=ifelse(color == "pel1",as.character(target_name.x),'')),hjust=0,vjust=0, max.overlaps = Inf) + 
@@ -482,10 +556,10 @@ cor(to_plot$log2FCGKpel, to_plot$log2FCski2, method = "pearson")
   #scale_color_manual(values = wes_palette(n=4, name="Darjeeling1"))+
   labs(y= "log2FC ski2-5", x = "log2FC pel1-2") +
   theme(aspect.ratio = 1)
-ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/scatterski2pel12final.svg", units = "in", width = 15, height = 15, dpi = 300)
-ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/3scatterski2pel12final.png", units = "in", width = 15, height = 15, dpi = 300)
+#ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/scatterski2pel12final.svg", units = "in", width = 15, height = 15, dpi = 300)
+#ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/3scatterski2pel12final.png", units = "in", width = 15, height = 15, dpi = 300)
 
-to_plot <- left_join(miRNAtargets_toscatter_pel1.1, miRNAtargets_toscatter_ski2.5, by = "gene") %>% 
+to_plot <- full_join(miRNAtargets_toscatter_pel1.1, miRNAtargets_toscatter_ski2.5, by = "gene") %>% 
   mutate(color = case_when(diffexp_ski2 == "yes" & diffexp_pel == "no" ~ "ski2", 
                            T ~ "none"), 
          color = case_when(diffexp_pel == "yes" & diffexp_ski2== "no" ~ "pel1", 
@@ -495,9 +569,18 @@ to_plot <- left_join(miRNAtargets_toscatter_pel1.1, miRNAtargets_toscatter_ski2.
   #filter(log2FCSAIL > 0 & log2FCski2 > 0) %>%
   filter(color %in% c("ski2", "pel1", "both"))
 
-cor(to_plot$log2FCSAIL, to_plot$log2FCski2, method = "pearson")
-  
-plot <- ggplot(to_plot, aes(x=log2FCSAIL, y = log2FCski2, col = color)) + 
+findlog2SAIL <- filter(to_plot, color == "ski2") %>% pull(gene)
+findlog2SAIL2 <- gathered_DESeqresults %>% 
+  filter(gene %in% findlog2SAIL & genotype == "SAILpelota") 
+
+test <- left_join(to_plot, findlog2SAIL2, by = "gene") %>% 
+  mutate(log2FCSAIL = case_when(is.na(log2FCSAIL) ~ log2FoldChange, 
+                                T ~ log2FCSAIL))
+
+
+cor(test$log2FCSAIL, test$log2FCski2, method = "pearson")
+
+plot <- ggplot(test, aes(x=log2FCSAIL, y = log2FCski2, col = color)) + 
   geom_point() + 
   geom_text_repel(aes(label=ifelse(color == "ski2",as.character(target_name.x),'')),hjust=0,vjust=0, max.overlaps = Inf) + 
   geom_text_repel(aes(label=ifelse(color == "pel1",as.character(target_name.x),'')),hjust=0,vjust=0, max.overlaps = Inf) + 
@@ -509,14 +592,14 @@ plot <- ggplot(to_plot, aes(x=log2FCSAIL, y = log2FCski2, col = color)) +
   geom_vline(xintercept = 0, size = 0.2, linetype = "dashed") +
   cowplot::theme_cowplot() +
   scale_colour_manual(values=c("none"="#aaaaaa","both"="#766161", "ski2" = "#3d84b8", "pel1" = "#ff8474")) +
-  ggtitle(label = "log2FC of miRNA targets in ski2-5 and pel1-1 with higher siRNA levels", subtitle = paste0("corr. coeff. r = ",cor(to_plot$log2FCSAIL, to_plot$log2FCski2, method = "pearson"))) +
+  ggtitle(label = "log2FC of miRNA targets in ski2-5 and pel1-1 with higher siRNA levels", subtitle = paste0("corr. coeff. r = ",cor(test$log2FCSAIL, test$log2FCski2, method = "pearson"))) +
   #scale_color_manual(values = wes_palette(n=4, name="Darjeeling1"))+
   labs(y= "log2FC ski2-5)", x = "log2FC pel1-1") +
- theme(aspect.ratio = 1)
-ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/scatterski2pel11final.svg", units = "in", width = 15, height = 15, dpi = 300)
-ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/3scatterski2pel11final.png", units = "in", width = 15, height = 15, dpi = 300)
+  theme(aspect.ratio = 1)
+ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/scatterski2pel11log2filtered.svg", units = "in", width = 15, height = 15, dpi = 300)
+#ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/3scatterski2pel11final.png", units = "in", width = 15, height = 15, dpi = 300)
 
-##### Supplm figure 1 #####
+#### Supplm figure S3 #####
 ### count miRNAs (miRNA genes) ###
 
 all_annotations <- readGFF("/binf-isilon/PBgrp/xpj980/TAIR/Arabidopsis_thaliana.TAIR10.46.gff3")
@@ -563,7 +646,7 @@ miRNAs_RPM_table <- normalized %>%
   filter(., biotype %in% "miRNA") %>% 
   spread(., genotyp, mean_RPM) %>% 
   drop_na(., Name) 
-
+save(miRNAs_RPM_table)
 sign_miRNAs <- left_join(miRNAs_RPM_table, joined_sign, by = "gene") %>% 
   mutate(sig = case_when(is.na(Name.y) ~ "no", 
                          TRUE ~ "yes")) %>%
@@ -604,7 +687,7 @@ to_plot3 <- to_plot %>%
                           sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
   glimpse()
 
-
+## this one is correct
 ski2_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -688,17 +771,22 @@ miRNA_genes <- mir_parse(pel_test$miRNA, simplify = T) %>%
 to_merge <- subset(sign_miRNAs, sign_miRNAs$Name.x %in% miRNA_genes) %>% 
   mutate(sign_target = "yes")
 
+sig_targets_pel1.1_filtered <- miRNAtargets_rawtable %>% 
+  select(target_id, miRNA_ID) %>% 
+  filter(!duplicated(.$target_id)) %>%
+  filter(target_id %in% pel1.1_miRNAtargets_filtered) %>% 
+  pull(miRNA_ID)
+
 to_plot <- left_join(sign_miRNAs, to_merge) %>% 
-  mutate(sign_target = case_when(is.na(sign_target) ~ "no", 
-                                 T ~ "yes"))
+  mutate(sign_target = case_when(gene %in% sig_targets_pel1.1_filtered ~ "yes", 
+                                 T ~ "no"))
+
 to_plot3 <- to_plot %>% 
-  mutate(both = case_when(sign_target == "yes" & sig == "no" ~ "target.miRNA", 
-                          sign_target == "no" & sig == "yes" ~ "diff.exp.miRNA", 
-                          sign_target == "no" & sig == "no" ~ "miRNA", 
-                          sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
+  mutate(both = case_when(sign_target == "yes" ~ "target.miRNA", 
+                          sign_target == "no"  ~ "miRNA")) %>% 
   glimpse()
 
-
+## this one is correct
 pel1.1_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -724,7 +812,7 @@ pel1.1_miRNAs <- to_plot3 %>%
   labs(y= "log2(pel1.1[meanRPM])", x = "log2(WT[meanRPM])") +
   theme(aspect.ratio = 1)
 
-ggsave(pel1.1_miRNAs, file = "/binf-isilon/PBgrp/xpj980/figures/20210424miRNAgenesscatterSAILpelaraport.svg", units = "in", width = 15, height = 15, dpi = 300)
+ggsave(pel1.1_miRNAs, file = "/binf-isilon/PBgrp/xpj980/figures/miRNAgenesscatterSAILpelaraportUPDATEDrevision.svg", units = "in", width = 15, height = 15, dpi = 300)
 
 # GKpelota
 joined_sign <- left_join(x = gathered_DESeqresults_pelota, y = genes) %>%
@@ -792,7 +880,7 @@ to_plot3 <- to_plot %>%
                           sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
   glimpse()
 
-
+## this one is correct
 pel1.2_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -905,7 +993,7 @@ to_plot3 <- to_plot %>%
                           sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
   glimpse()
 
-
+## this one is correct
 rrp4_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -999,7 +1087,7 @@ to_plot3 <- to_plot %>%
                           sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
   glimpse()
 
-
+## this one is correct
 hen2_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -1111,7 +1199,7 @@ to_plot3 <- to_plot %>%
                           sign_target == "yes" & sig == "yes" ~ "diff.exp.miRNA.target")) %>% 
   glimpse()
 
-
+## this one is correct
 rrp45a_miRNAs <- to_plot3 %>% 
   #mutate(both = factor(both, c("diff.exp.miRNA.target", "diff.exp.miRNA", "target.miRNA", "miRNA"))) %>% 
   #mutate(both = factor(both, c("miRNA", "target.miRNA", "diff.exp.miRNA", "diff.exp.miRNA.target"))) %>%
@@ -1200,6 +1288,7 @@ to_tally$plot <- factor(to_tally$plot, levels = c("miRNA_targetup", "miRNA_targe
 #ggsave(barplot_across_geno, file = "/binf-isilon/PBgrp/xpj980/figures/20210325Figure4Aaraport.svg", device = "svg", units = "in", width = 15, height = 15, dpi = 300)
 
 ###### Figure 4B ##### 
+############ count other biotypes ##########
 araport_TE_IDs <- import.gff("/binf-isilon/PBgrp/xpj980/TAIR/Araport11_GFF3_genes_transposons.201606.gff")
 
 TE_IDs <- araport_TE_IDs %>% 
@@ -1211,7 +1300,7 @@ TE_IDs <- araport_TE_IDs %>%
   rename(ID = "gene")
 
 
-# edit type feature column from custom made feature to original 
+# edit type column from whole shabang to original 
 araport_original <- import.gff("/binf-isilon/PBgrp/xpj980/TAIR/Araport11_GFF3_genes_transposons.201606.gff") %>% 
   as.tibble() %>% 
   select(type, ID, locus_type) %>% 
@@ -1268,68 +1357,33 @@ to_plot$miRNA= factor(to_plot$miRNA, levels = c("miRNAtarget", "mirna", "long_no
     cowplot::theme_cowplot() +
     theme(axis.text.x = element_text(angle = 90, hjust = 0)) +
     scale_color_manual(values = c(wes_palette("Darjeeling1", n = 9, type = ("continuous")))) 
-    # theme(aspect.ratio = 1)
-    )
+  # theme(aspect.ratio = 1)
+)
 
 ggsave(loveplot, file = "/binf-isilon/PBgrp/xpj980/figures/Figure4boxplotwithTEandintergenicNSincluded.svg", units = "in", width = 10, height = 10, dpi = 300)
 
 
+### barplot version ### 
+to_plot %>% 
+  group_by(genotype, miRNA, up_or_down) %>% 
+  add_tally() %>%
+  filter(up_or_down == "up") %>%
+  ggplot(aes(x= miRNA, y = n, fill = miRNA)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~genotype, scales = "free_y") +
+  xlab("miRNA targets vs other locustypes") +
+  ylab("sum") +
+  cowplot::theme_cowplot() + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_manual(values = c(wes_palette("Darjeeling1", n = 9, type = ("continuous")))) 
+ggsave(loveplot, file = "/binf-isilon/PBgrp/xpj980/figures/Figure4barplotversion.svg", units = "in", width = 10, height = 10, dpi = 300)
+
+
 ##### Figure 4C #####
+########## try with sizes ########
 # next time just load this one 
 load("/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exosomedata1_sizes_normalizedreads.RData")
-
-raw_featureCount_sizes <- read.table("/binf-isilon/PBgrp/xpj980/datascratch/2019_exosome_mutants/04.STAR_mapping/sam_files/by_size/bam/featureCountssizesaraport", header = TRUE, row.names = 1) %>%
-  glimpse()
-
-size_table <- raw_featureCount_sizes %>% 
-  select(contains(".15"), contains(".16"), contains(".17"), contains(".18"), contains(".19"), contains(".20"), contains(".21"), contains(".22"), contains(".23"), contains(".24"), contains(".25"), contains(".26"), contains(".27"), contains(".28"), contains(".29"), contains(".30")) %>% 
-  select(contains("Col.0"), contains("hen2.5"), contains("ski2.5"), contains("rrp4_")) %>%
-  glimpse()
-
-n <- names(size_table) %>% 
-  str_remove("Aligned.out.") %>% 
-  str_remove(".sorted.bam") %>% 
-  str_replace(pattern = "Col.0.WT", replacement = "wt") %>% 
-  str_replace(pattern = "R1.", replacement = "R1_") %>% 
-  str_replace(pattern = "R2.", replacement = "R2_") %>%
-  str_replace(pattern = "R3.", replacement = "R3_")
-
-names(size_table) <- n
-glimpse(size_table)
-
-## make table plotable ##
-
-size_table_plotable <- size_table %>% 
-  rownames_to_column(var = "gene") %>%
-  as_tibble() %>% 
-  separate(col = gene, into = c("gene", "exon", "exonno"), sep = ":") %>%
-  select(- c("exon", "exonno")) %>% 
-  glimpse()
-
-test_table_summed <- size_table_plotable %>%
-  group_by(gene) %>%
-  summarise(across(everything(), sum)) %>% 
-  as.data.frame()
-
-keycol <- "genotype"
-valcol <- "count"
-gathercols <- c(names(test_table_summed[,2:193]))
-
-test <- gather_(test_table_summed, keycol, valcol, gathercols)
-
-plotable_split <- separate(test, col = genotype, into = c("genotyp", "rep", "size"), sep = "_")
-
-normalized <- plotable_split %>% group_by(genotyp,rep) %>%
-  mutate(RPM = count*1000000/sum(count)) %>%
-  group_by(gene, genotyp, size) %>% 
-  summarise(mean_RPM = mean(RPM))
-
-normalized_for_errorbars <- plotable_split %>% 
-  group_by(genotyp,rep) %>%
-  mutate(RPM = count*1000000/sum(count))
-
-save(normalized_for_errorbars, 
-     file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exosomedata1_sizes_normalizedreads.RData")
 
 genes <- all_annotations %>% 
   as_tibble() %>% 
@@ -1368,7 +1422,8 @@ test_errorbar <- filter(normalized_for_errorbars, gene %in% all_genes_table1$gen
 all_genes_table1$up_or_down = factor(all_genes_table1$up_or_down, levels = c("up", "down"))
 
 
-## group meanRPM for each size by genotype also ###
+### new one ###
+#### now the mean_RPM of sizes of sRNA is grouped by genotype also ######
 to_level <- filter(all_genes_table, genotype == "ski2.5" & log2FoldChange > 0) 
 
 ski2_genes_meanRPM <- test_errorbar %>% 
@@ -1411,6 +1466,7 @@ to_plot <- bind_rows(ski2_genes_meanRPM, rrp4_genes_meanRPM, hen2_genes_meanRPM)
 to_plot$genotyp = factor(to_plot$genotyp, levels = c("ski2.5", "hen2.5", "rrp4" ))
 to_plot$locustype =factor(to_plot$locustype, levels = c("known miRNA target","protein_coding","transposable_element", "intergenic"))
 
+
 solution4_errorbars <- ggplot(to_plot, aes(x = size, y = mean_RPM, fill = genotyp)) + 
   stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
   stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2) +
@@ -1419,18 +1475,6 @@ solution4_errorbars <- ggplot(to_plot, aes(x = size, y = mean_RPM, fill = genoty
   cowplot::theme_cowplot() + 
   theme(aspect.ratio = 1)
 #ggsave(solution4_errorbars, file = "/binf-isilon/PBgrp/xpj980/figures/figure4Dsizesaraport_correctothergrid.svg", units = "in", width = 15, height = 10, dpi = 300)
-
-
-solution4_errorbars <- to_plot %>% 
-  filter(locustype == "intergenic") %>% 
-  ggplot(., aes(x = size, y = mean_RPM, fill = genotyp)) + 
-  stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
-  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2) +
-  facet_wrap(~genotyp, nrow =1, scales = "free_y") + 
-  scale_fill_manual(values = wes_palette("Darjeeling2", n = 3)) +
-  cowplot::theme_cowplot() + 
-  theme(aspect.ratio = 1)
-#ggsave(solution4_errorbars, file = "/binf-isilon/PBgrp/xpj980/figures/figure4Dsizesaraport_intergenic.svg", units = "in", width = 15, height = 10, dpi = 300)
 
 #### Figure 5A ####
 geneset <- gathered_DESeqresults_rrp4 %>% 
@@ -1458,6 +1502,7 @@ norm_counts_matrix <- as.data.frame(normalized_counts) %>%
          rrp4_avg = ((rrp4_R1 + rrp4_R2 + rrp4_R3)/3)) %>% 
   select(gene, wt_avg, ski2.5_avg, hen2.5_avg, rrp4_avg) %>% 
   column_to_rownames(var = "gene")
+## this is just a suggestion to Peter, if he likes it then work more on it. If not go back to orignal by deleting annotation_row argument 
 
 annot_cols <- norm_counts_matrix %>% 
   rownames_to_column(var = "gene") %>% 
@@ -1528,7 +1573,7 @@ normalized_heatmap_rowclust <- pheatmap(norm_counts_matrix,
                                         scale = "row",
                                         color = rev(RColorBrewer::brewer.pal(name = "RdBu", n=6)),
                                         main = "significant DE miRNA targets RPM")
-ggsave(normalized_heatmap_rowclust, file = "/binf-isilon/PBgrp/xpj980/figures/20210419normheatrrp42019dataFILTEREDaraport.svg", units = "in", width = 15, height = 15, dpi = 300)
+#ggsave(normalized_heatmap_rowclust, file = "/binf-isilon/PBgrp/xpj980/figures/20210419normheatrrp42019dataFILTEREDaraport.svg", units = "in", width = 15, height = 15, dpi = 300)
 
 #### Figure 5B #####
 
@@ -1552,201 +1597,8 @@ rrp4_list <- left_joined[left_joined$genotype=="rrp4",] %>%
   filter(!is.na(miRNA)) %>%
   pull(gene) 
 
-
-test <- venn.diagram(
-  x = list(ski2_list, hen2_list, rrp4_list), 
-  category.names = c("ski2" ,"hen2", "rrp4"),
-  output = TRUE ,
-  filename = NULL, 
-  imagetype="svg" ,
-  height = 480 , 
-  width = 480 , 
-  resolution = 300,
-  compression = "lzw",
-  lwd = 1,
-  col=c("#283148", "#913535", "#bbbbbb"),
-  fill = c(alpha("#283148"), alpha("#913535"), alpha("#bbbbbb")),
-  cex = 0.5,
-  fontfamily = "sans",
-  cat.cex = 0.3,
-  cat.default.pos = "outer",
-  cat.pos = c(-27, 27, 135),
-  cat.dist = c(0.055, 0.055, 0.085),
-  cat.fontfamily = "sans",
-  cat.col = c("black", 'black', 'black'),
-  rotation = 1
-)
-ggsave(test, filename = "/binf-isilon/PBgrp/xpj980/figures/5Xvennaraportall3.svg")
-
-test <- venn.diagram(
-  x = list(ski2_list, hen2_list), 
-  category.names = c("ski2" ,"hen2"),
-  output = TRUE ,
-  filename = NULL, 
-  imagetype="svg" ,
-  height = 480 , 
-  width = 480 , 
-  resolution = 300,
-  compression = "lzw",
-  lwd = 1,
-  col=c("#283148", "#913535"),
-  fill = c(alpha("#283148"), alpha("#913535")),
-  cex = 0.5,
-  fontfamily = "sans",
-  cat.cex = 0.3,
-  cat.default.pos = "outer",
-  cat.pos = c(-27, 27),
-  cat.dist = c(0.055, 0.055),
-  cat.fontfamily = "sans",
-  cat.col = c("black", 'black')
-)
-ggsave(test, filename = "/binf-isilon/PBgrp/xpj980/figures/5Xvennaraporthen2ski2.svg")
-
-#### Figure 7A ####
-## miRNARPM vs log2FC plots ##
-my_target_list <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/TAIR/miRNAtargetlist_Maria_done.xlsx", col_names = T) 
-
-miRNAs_RPM_table <- normalized %>% 
-  left_join(., genes, by = "gene") %>% 
-  filter(., biotype %in% "miRNA") %>% 
-  spread(., genotyp, mean_RPM) %>% 
-  drop_na(., Name) %>%
-  rename(., gene = "miRNA_ID") %>%
-  group_by(miRNA_ID, Name) %>%
-  summarise_if(is.numeric, sum, na.rm=T)
-
-targets_unique <- filter(my_target_list, !duplicated(my_target_list$target_id))
-
-## miRNA expression levels barplot ##
-miRNA_rpm_rrp4 <- normalized_for_errorbars %>%
-  left_join(., genes, by = "gene") %>% 
-  filter(., biotype %in% "miRNA" & genotyp == "rrp4") %>% 
-  group_by(gene, rep) %>%
-  summarise(all_sizes_RPM = sum(RPM)) %>%
-  left_join(., genes, by = "gene") %>% 
-  mutate(Name = case_when(is.na(Name) ~ gene, 
-                          TRUE ~ Name))
-
-miRNA_RPM_errorbars <- ggplot(miRNA_rpm_rrp4, aes(x = Name, y = all_sizes_RPM)) + 
-  stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
-  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2) +
-  #facet_grid(~locustype, scales = "free") + 
-  #scale_fill_manual(values = wes_palette("Darjeeling2", n = 3)) +
-  cowplot::theme_cowplot() 
-
-### rrp4 plot 
-rrp4_df <- gathered_DESeqresults_rrp4 %>% subset(., genotype %in% "rrp4") %>%
-  rename(., gene = "target_id") %>%
-  left_join(., my_target_list, by = "target_id") %>%
-  filter(!is.na(miRNA_ID)) %>%
-  mutate(., sign.diff.target = case_when(padj < 0.05  ~ "yes", 
-                                         padj > 0.05  ~ "no")) %>%
-  filter(!is.na(sign.diff.target)) %>%
-  rename(miRNA_ID = "gene")
-
-which_targets_sign <- subset(rrp4_df, sign.diff.target %in% "yes")  
-
-
-test1 <- left_join(miRNA_rpm_rrp4, rrp4_df, by = "gene") %>%
-  filter(!is.na(log2FoldChange) & log2FoldChange > 0)
-
-test11 <- mutate(test1, target_name = ifelse(target_name == "/",as.character(target_id), target_name)) %>% glimpse
-
-test12 <- test11 %>% 
-  group_by(gene, target_name, target_id, rep, Name) %>%
-  summarise(rrp4_miRNA_sum = sum(all_sizes_RPM)) %>%
-  glimpse()
-
-test13 <- left_join(test12, test11) %>%
-  group_by(gene, target_name, target_id, Name, sign.diff.target) 
-#summarise(sizes_rep_rrp4_MiRNA_RPM_mean = mean(all_sizes_RPM))
-
-test14 <- test13[!duplicated(test13[c(4,5)]),]
-
-plot <- ggplot(test14, aes(x = reorder(Name, all_sizes_RPM), y = all_sizes_RPM, fill = sign.diff.target)) +
-  #geom_bar(stat = "identity", position = "dodge") +
-  stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
-  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2) +
-  scale_fill_brewer(palette = "Dark2") +
-  geom_hline(yintercept = 243, colour="#536162", linetype="dashed") +
-  cowplot::theme_cowplot() + 
-  theme(axis.text.x = element_text(angle = 90))
-ggsave(plot, file = "/binf-isilon/PBgrp/xpj980/figures/rrp4miRNARPMbetter20210419.svg", units = "in", width = 15, height = 15, dpi = 300)
-
-test2 <- test11 %>% 
-  arrange(., desc(all_sizes_RPM)) %>%
-  filter(., sign.diff.target %in% "yes") 
-
-test3 <- test2 %>% dplyr::distinct(target_name,.keep_all = T) %>% 
-  group_by(target_name) %>% 
-  top_n(1, all_sizes_RPM) %>% 
-  mutate(to_label= rep("yes"))%>%
-  glimpse()
-
-test4 <- full_join(test1, test3) %>%
-  mutate(., to_label = case_when(is.na(to_label)  ~ "no", 
-                                 T ~ "yes")) %>%
-  glimpse()
-
-arrange(test4, desc(log2FoldChange))
-
-test5 <- test4 %>% 
-  group_by(target_name, sign.diff.target) %>%
-  arrange(., desc(all_sizes_RPM)) %>%
-  top_n(1, all_sizes_RPM)  %>% glimpse()
-
-test14_avg <- test14 %>% 
-  group_by(gene, target_id, target_name, Name) %>%
-  mutate(avg_miRNA = mean(rrp4_miRNA_sum)) %>% 
-  filter(rep == "R1") %>% glimpse()
-
-unique(test14_avg$avg_miRNA)
-
-test_plot <- ggplot(test14_avg, aes(x=log2(avg_miRNA), y=log2FoldChange, color = sign.diff.target)) +
-  geom_point() +
-  scale_color_brewer(palette = "Dark2") +
-  cowplot::theme_cowplot() + 
-  ggtitle(label = "rrp4", subtitle = "relation between miRNA expression level and log2FC of target sec. siRNAs") +
-  #geom_text_repel(aes(label = as.character(target_name))) +
-  #geom_text_repel(aes(label = ifelse(sign.diff.target == "yes",as.character(Name),'')), size = 3) +
-  #geom_text_repel(aes(label = ifelse(sign.diff.target == "yes",as.character(target_name),'')),hjust=0,vjust=0, size = 5) +
-  #scale_color_manual(values = wes_palette(n=2, name="Moonrise3"))+
-  labs(y= "sec siRNA log2FC(rrp4/WT)", x = "log2[meanRPM] miRNA in rrp4 mutant") 
-ggsave(test_plot, file = "/binf-isilon/PBgrp/xpj980/figures/log2FCmiRNARPMrrp4nonamesaraport.svg", units = "in", width = 15, height = 15, dpi = 300)
-
-miRNAs <- test13 %>% 
-  ungroup() %>%
-  select(rrp4_miRNA_sum, gene, Name, sign.diff.target) %>%
-  distinct() %>% 
-  mutate(rrp4_miRNA_sum = log2(rrp4_miRNA_sum)) %>%
-  arrange(., rrp4_miRNA_sum)
-
-test <- ggplot(miRNAs, aes(x = reorder(Name, rrp4_miRNA_sum),  y = rrp4_miRNA_sum, fill = sign.diff.target)) +
-  geom_bar(stat = "identity", position = "identity") +
-  scale_fill_brewer(palette = "Dark2") +
-  scale_y_continuous(breaks = c(0,5,10)) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 6)) +
-  #geom_text(aes(label = as.character(Name), angle = 90)) +
-  cowplot::theme_cowplot()
-ggsave(test, file = "/binf-isilon/PBgrp/xpj980/figures/miRNAsRPMtest.svg", units = "in", width = 15, height = 15, dpi = 300)
-
-sum_size_plot <- ggplot(test5, aes(x=wt, y=rrp4, color = sign.diff.target, alpha = 0.6)) +
-  geom_point() +
-  scale_y_continuous(trans = "log") +
-  scale_x_continuous(trans = "log") +
-  geom_hline(yintercept = 1, colour="#990000", linetype="dashed") + 
-  geom_vline(xintercept = 1, colour="#990000", linetype="dashed") +
-  geom_abline(intercept = 0, slope = 1) +
-  cowplot::theme_cowplot() +
-  #geom_text_repel(aes(label = ifelse(sign.diff.target == "yes",as.character(Name),'')), size = 3) +
-  #geom_text_repel(aes(label = ifelse(sign.diff.target == "yes",as.character(target_name),'')),hjust=0,vjust=0, size = 5) +
-  ggtitle(label = "rrp4", subtitle = "scatterplot of miRNA genes in rrp4 vs WT") +
-  scale_color_manual(values = wes_palette(n=4, name="BottleRocket2"))+
-  labs(y= "log2(rrp4[meanRPM])", x = "log2(WT[meanRPM])")
-ggsave(sum_size_plot, file = "/binf-isilon/PBgrp/xpj980/figures/miRNAexpplotrrp4.svg", units = "in", width = 15, height = 15, dpi = 300)
-
-#### suppl. fig 4 ####
-
+#### suppl. fig 6 ####
+###### Figure 6A ######
 barplot_table <- left_join(x = gathered_DESeqresults_rrp4, y = miRNAtargets, by = "gene", copy = FALSE) %>%
   filter(padj < 0.05) 
 
@@ -1804,4 +1656,313 @@ to_tally$plot <- factor(to_tally$plot, levels = c("miRNA_targetup", "miRNA_targe
           legend.text = element_text(size = 8))) + 
   theme(aspect.ratio = 1)
 ggsave(barplot_across_geno, file = "/binf-isilon/PBgrp/xpj980/figures/rrp45a.svg", units = "in", width = 15, height = 15, dpi = 300)
+
+#### Supplemental Figure #### 
+#ski2-5 overlaps 
+
+# load 2015 dataset and also sop1 dataset 
+
+ski2_setB <- gathered_DESeqresults %>% 
+  filter(genotype == "ski2.5") %>% 
+  filter(padj < 0.05) %>% 
+  left_join(x = ., y = miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
+                                log2FoldChange < 0 ~ "down"), 
+         miRNA = case_when(is.na(miRNA) ~ "other", 
+                           TRUE ~ "miRNA_target")) 
+
+load(file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2015_gatheredDESeqresults.RData")
+
+ski2_setA <- gathered_DESeqresults %>% 
+  filter(genotype == "ski2.5") %>% 
+  filter(padj < 0.05) %>% 
+  left_join(x = ., y = miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
+                                log2FoldChange < 0 ~ "down"), 
+         miRNA = case_when(is.na(miRNA) ~ "other", 
+                           TRUE ~ "miRNA_target")) 
+
+look <- filter(ski2_setA, up_or_down == "up" & miRNA == "miRNA_target")
+
+# what if I had filtered on certain log2FoldChange instead of padj for sample with one replicate 
+
+ski2_setA_filtered <- gathered_DESeqresults %>%
+  filter(genotype == "ski2.5") %>% 
+  #filter(padj < 0.05) %>%
+  filter(log2FoldChange > 1) %>%
+  left_join(x = ., y = miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
+                                log2FoldChange < 0 ~ "down"), 
+         miRNA = case_when(is.na(miRNA) ~ "other", 
+                           TRUE ~ "miRNA_target")) %>%
+  filter(miRNA == "miRNA_target")
+
+miRNAs_logFCfiltered <- left_join(ski2_setA_filtered, miRNAtargets, by = "gene")
+
+load(file = "/binf-isilon/PBgrp/xpj980/R_scripts_collected/2019exovol2DESEQtable.RData")
+
+ski2_setC <- gathered_DESeqresults %>% 
+  filter(genotype == "ski2.5") %>% 
+  filter(padj < 0.05) %>% 
+  left_join(x = ., y = miRNAtargets, by = "gene", copy = FALSE) %>% 
+  mutate(up_or_down = case_when(log2FoldChange > 0 ~ "up", 
+                                log2FoldChange < 0 ~ "down"), 
+         miRNA = case_when(is.na(miRNA) ~ "other", 
+                           TRUE ~ "miRNA_target")) 
+
+filter(ski2_setC, up_or_down == "up" & miRNA == "miRNA_target")
+
+ski2_setA_miRNAtargets_up <- ski2_setA_filtered %>% filter(up_or_down == "up" & miRNA == "miRNA_target") %>% pull(gene)
+ski2_setB_miRNAtargets_up <- ski2_setB %>% filter(up_or_down == "up" & miRNA == "miRNA_target") %>% pull(gene)
+ski2_setC_miRNAtargets_up <- ski2_setC %>% filter(up_or_down == "up" & miRNA == "miRNA_target") %>% pull(gene)
+
+#ski2_setA_miRNAtargets_down <- ski2_setA %>% filter(up_or_down == "down" & miRNA == "miRNA_target") %>% pull(gene)
+ski2_setB_miRNAtargets_down <- ski2_setB %>% filter(up_or_down == "down" & miRNA == "miRNA_target") %>% pull(gene)
+ski2_setC_miRNAtargets_down <- ski2_setC %>% filter(up_or_down == "down" & miRNA == "miRNA_target") %>% pull(gene)
+
+#ski2_setA_other_up <- ski2_setA %>% filter(up_or_down == "up" & miRNA == "other") %>% pull(gene)
+ski2_setB_other_up <- ski2_setB %>% filter(up_or_down == "up" & miRNA == "other") %>% pull(gene)
+ski2_setC_other_up <- ski2_setC %>% filter(up_or_down == "up" & miRNA == "other") %>% pull(gene)
+
+#ski2_setA_other_down <- ski2_setA %>% filter(up_or_down == "down" & miRNA == "other") %>% pull(gene)
+ski2_setB_other_down <- ski2_setB %>% filter(up_or_down == "down" & miRNA == "other") %>% pull(gene)
+ski2_setC_other_down <- ski2_setC %>% filter(up_or_down == "down" & miRNA == "other") %>% pull(gene)
+
+colors <- c("#FFA6D5", "#8E0505", "#9CC094")
+
+# hits overlap
+s4 <- list(setA = c(ski2_setA_miRNAtargets_up),
+           setB = c(ski2_setB_miRNAtargets_up), 
+           setC = c(ski2_setC_miRNAtargets_up))
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/sets_euler_miRNAtargetuplog2FC09.svg")
+
+colors <- c("#8E0505", "#9CC094")
+s4 <- list(setB = c(ski2_setB_miRNAtargets_down), 
+           setC = c(ski2_setC_miRNAtargets_down))
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/sets_euler_miRNAtargetdownfilt.svg")
+
+s4 <- list(
+  setB = c(ski2_setB_other_up), 
+  setC = c(ski2_setC_other_up))
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/sets_euler_otherupfilt.svg")
+
+s4 <- list(
+  setB = c(ski2_setB_other_down), 
+  setC = c(ski2_setC_other_down))
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/sets_euler_otherdownfilt.svg")
+
+# overlap with Anjas paper 
+
+ski2.4_miRNAtargets <- c("AT1G62670", "AT1G62930", "AT1G62910", "AT1G63150", "AT1G63080", "AT1G63130", "AT1G63400", "AT1G63330", "AT1G62590", "AT1G63070", "AT1G12775", "AT1G12620", "AT5G43270", "AT2G28350", "AT1G77850", "AT5G39610", "AT2G34710", "AT1G30490", "AT5G60690", "AT1G30330", "AT1G48410", "AT2G45160", "AT4G36920", "AT3G15030", "AT4G18390", "AT1G53230", "AT3G23690", "AT1G12820", "AT2G33770", "AT1G12290", "AT5G43740", "AT1G02860", "AT3G21170")
+
+# all four ski2 samples
+s4 <- list(setA = c(ski2_setA_miRNAtargets_up),
+           setB = c(ski2_setB_miRNAtargets_up), 
+           setC = c(ski2_setC_miRNAtargets_up), 
+           setD = c(ski2.4_miRNAtargets))
+colors <- c("#FFA6D5", "#8E0505", "#9CC094", "#7F7C82")
+
+hits <- plot(euler(s4, shape = "ellipse"), quantities = TRUE, fill = colors)
+ggsave(hits, filename = "/binf-isilon/PBgrp/xpj980/figures/sets_euler_miRNAtargetuplog2FCAnjas.svg")
+
+
+#### qPCR ####
+
+FL_qPCR <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/qPCR_tables/NAR_FLResultssaved.xlsx", col_names = T) %>% 
+  select(Well, Cq, target, genotype) %>% 
+  filter(target != "empty")  
+
+# remove WT outliers
+FL_qPCR %>% filter(genotype == "WT")
+
+FL_qPCR <- filter(FL_qPCR, Well != "B06") %>% 
+  filter(., Well != "C11")
+
+control <- filter(FL_qPCR, target == "ACT2") %>% 
+  select(genotype, Cq) %>% 
+  rename(Cq = "CTRLcq") %>%
+  group_by(genotype) %>%
+  summarise(CTRLcq = mean(CTRLcq)) %>% 
+  mutate(CF = rep("FL"))
+
+deltaCq <- FL_qPCR %>% 
+  filter(target != "ACT2") %>%
+  left_join(., control) %>% 
+  mutate(delta = Cq - CTRLcq, 
+         CF = rep("FL"))
+
+average_WT <- deltaCq %>% 
+  filter(genotype == "WT") %>% 
+  group_by(target) %>% 
+  summarise(avg_delta = mean(delta))
+
+to_plot <- left_join(deltaCq, average_WT) %>% 
+  mutate(deltadelta = delta - avg_delta) %>%
+  mutate(deltadeltapow = 2^(-deltadelta))
+
+FL_toplot <- to_plot  
+
+plot <- FL_toplot %>% 
+  ggplot(., aes(x = genotype, y = log2(deltadeltapow), fill = genotype)) +
+  stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2) +
+  geom_point() +
+  facet_wrap(~target, nrow = 1) +
+  cowplot::theme_cowplot()
+
+# good now add 5CF and 3CF data #
+#OBS make individual RSG2 plot for 3CF as it is the only sample with measurable Ct
+# 5CF 
+CF5_qPCR <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/qPCR_tables/NAR_5CF.xlsx", col_names = T) %>% 
+  select(Well, Cq, target, genotype) %>% 
+  filter(target != "empty")
+
+
+# remove WT outliers
+CF5_qPCR %>% filter(genotype == "WT")
+# none to remove
+
+control <- filter(CF5_qPCR, target == "ACT2") %>% 
+  select(genotype, Cq) %>% 
+  rename(Cq = "CTRLcq") %>%
+  group_by(genotype) %>%
+  summarise(CTRLcq = mean(CTRLcq)) %>% 
+  mutate(CF = rep("5CF"))
+
+deltaCq <- CF5_qPCR %>% 
+  filter(target != "ACT2") %>%
+  left_join(., control) %>% 
+  mutate(delta = Cq - CTRLcq, 
+         CF = rep("5CF"))
+
+average_WT <- deltaCq %>% 
+  filter(genotype == "WT") %>% 
+  group_by(target) %>% 
+  summarise(avg_delta = mean(delta))
+
+to_plot <- left_join(deltaCq, average_WT) %>% 
+  mutate(deltadelta = delta - avg_delta) %>%
+  mutate(deltadeltapow = 2^(-deltadelta))
+
+CF5_toplot <- to_plot 
+# filter(genotype != "WT") 
+
+# 3CF 
+CF3_qPCR <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/qPCR_tables/NAR_3CF.xlsx", col_names = T) %>% 
+  select(Well, Cq, target, genotype) %>% 
+  filter(target != "empty") 
+
+# remove WT outliers
+CF3_qPCR %>% filter(genotype == "WT")
+
+CF3_qPCR <- filter(CF3_qPCR, Well != "C09")
+
+control <- filter(CF3_qPCR, target == "ACT2") %>% 
+  select(genotype, Cq) %>% 
+  rename(Cq = "CTRLcq") %>%
+  group_by(genotype) %>%
+  summarise(CTRLcq = mean(CTRLcq)) %>% 
+  mutate(CF = rep("3CF"))
+
+deltaCq <- CF3_qPCR %>% 
+  filter(target != "ACT2") %>%
+  left_join(., control) %>% 
+  mutate(delta = Cq - CTRLcq, 
+         CF = rep("3CF"))
+
+average_WT <- deltaCq %>% 
+  filter(genotype == "WT") %>% 
+  group_by(target) %>% 
+  summarise(avg_delta = mean(delta))
+
+to_plot <- left_join(deltaCq, average_WT) %>% 
+  mutate(deltadelta = delta - avg_delta) %>%
+  mutate(deltadeltapow = 2^(-deltadelta))
+
+CF3_toplot <- to_plot 
+
+# merge all three tables 
+
+gathered_qPCR <- rbind(... = FL_toplot, CF5_toplot, CF3_toplot)
+
+gathered_qPCR$genotype <- factor(gathered_qPCR$genotype, levels = c("ski2.5", "ski2.2", "pel1.1", "pel1.2", "WT"))
+gathered_qPCR$CF <- factor(gathered_qPCR$CF, levels = c("5CF", "FL", "3CF"))
+
+plot <- gathered_qPCR %>% 
+  group_by(genotype, CF, target) %>%
+  ggplot(., aes(x = CF, y = log2(deltadeltapow), fill = CF)) +
+  stat_summary(geom = "bar", fun = "mean", position = "dodge") + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2, color = "grey") +
+  geom_point() +
+  ggtitle("facet by genotype") +
+  scale_fill_brewer() +
+  facet_grid(target~genotype, scales = "free") +
+  cowplot::theme_cowplot()
+ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/qPCRFCgeno.svg")
+
+my_pal <- c("#142F43", "#32C1CD", "#E9A6A6","#C85C5C")
+
+plot <- gathered_qPCR %>% 
+  filter(genotype != "WT") %>%
+  group_by(genotype, CF, target) %>%
+  ggplot(., aes(x = genotype, y = log2(deltadeltapow), fill = genotype,  alpha = 0.7)) +
+  stat_summary(geom = "bar", fun = "mean", position = "dodge", width = 0.5) + 
+  stat_summary(fun.data = mean_se, geom = "errorbar", position = "dodge", size = 0.2, width = 0.5) +
+  geom_point(size = 0.4) +
+  ggtitle("log2(FC) value and facet by CF") +
+  geom_hline(yintercept = 0, size =0.2) +
+  scale_fill_manual(values = my_pal) +
+  facet_grid(target~CF, scales = "free") +
+  cowplot::theme_cowplot()
+ggsave(plot, filename = "/binf-isilon/PBgrp/xpj980/figures/qPCRlog2FCCF.svg")
+
+#### Tukey test ####
+
+# test on one target 
+
+PHO2_Tukey <- filter(gathered_qPCR, target == "PHO2" & CF == "FL")
+
+model <- aov(log2(deltadeltapow)~genotype, data=PHO2_Tukey)
+summary(model)
+
+TukeyHSD(model, conf.level=.95)
+
+RSG2_Tukey <- filter(gathered_qPCR, target == "RSG2" & CF == "3CF")
+
+model <- aov(log2(deltadeltapow)~genotype, data=RSG2_Tukey)
+summary(model)
+
+TukeyHSD(model, conf.level=.95)
+
+SPL2_Tukey <- filter(gathered_qPCR, target == "SPL2" & CF == "FL")
+
+model <- aov(log2(deltadeltapow)~genotype, data=SPL2_Tukey)
+summary(model)
+
+TukeyHSD(model, conf.level=.95)
+
+#### seed count ####
+
+seeds_count <- readxl::read_xlsx("/binf-isilon/PBgrp/xpj980/qPCR_tables/counts.xlsx", col_names = T) %>% 
+  column_to_rownames(var = "genotype")
+
+seed_frq <- prop.table(data.matrix(seeds_count), 1) %>%
+  melt() %>%
+  as.data.frame()
+
+colors <- c("#7E370C", "#FFCE45")
+
+seeds <- ggplot(seed_frq, aes(x=Var1, y= value, fill = Var2)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  scale_fill_manual(values = colors)
+
+ggsave(seeds, filename = "/binf-isilon/PBgrp/xpj980/figures/seedcount.svg")
 
